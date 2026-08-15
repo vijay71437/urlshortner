@@ -3,9 +3,11 @@ package com.url.service;
 
 import com.url.dto.UrlAnalyticsResponse;
 import com.url.entity.Url;
+import com.url.entity.User;
 import com.url.exception.UrlNotFoundException;
 import com.url.repository.UrlClickRepository;
 import com.url.repository.UrlRepository;
+import com.url.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -19,8 +21,16 @@ public class AnalyticsService {
 
     private final UrlRepository urlRepository;
     private final UrlClickRepository urlClickRepository;
+    private final UserRepository userRepository;
 
-    public UrlAnalyticsResponse getAnalytics(Long urlId) {
+    public UrlAnalyticsResponse getAnalytics(Long urlId,String email) {
+        User user = userRepository
+                .findByEmail(email)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "User not found"
+                        )
+                );
 
         Url url = urlRepository.findById(urlId)
                 .orElseThrow(() ->
@@ -28,6 +38,14 @@ public class AnalyticsService {
                                 "URL not found with id: " + urlId
                         )
                 );
+
+        if (!url.getUser().getId().equals(user.getId())) {
+            throw new UrlNotFoundException(
+                    "URL not found with id: " + urlId
+            );
+        }
+
+
 
         LocalDate today = LocalDate.now();
 

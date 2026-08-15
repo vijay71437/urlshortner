@@ -3,12 +3,16 @@ package com.url.service;
 import com.url.dto.CreateUrlRequest;
 import com.url.dto.UrlResponse;
 import com.url.entity.Url;
+import com.url.entity.User;
 import com.url.exception.UrlNotFoundException;
 import com.url.repository.UrlRepository;
 import com.url.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -17,38 +21,38 @@ public class UrlService {
     private final UrlRepository urlRepository;
     private final ShortCodeGenerator shortCodeGenerator;
     private final UrlClickService urlClickService;
+    private final UserRepository userRepository;
 
-    public UrlResponse createUrl(CreateUrlRequest request){
-        String shortCode;
-        do{
-            shortCode=shortCodeGenerator.generate();
-        }while (urlRepository.existsByShortCode(shortCode));
-        Url url=Url.builder()
-                .shortCode(shortCode)
-                .orginalUrl(request.originalUrl())
-                .clickCount(0L)
-                .build();
-        Url savedUrl=urlRepository.save(url);
-        String shortUrl="http://localhost:8080/"+shortCode;
-        return new UrlResponse(savedUrl.getId(), savedUrl.getOrginalUrl(),savedUrl.getShortCode(),shortUrl, savedUrl.getClickCount());
-    }
 
     public String redirect(String shortCode,String ipAddress,String userAgent){
         Url url = urlRepository.findByShortCode(shortCode).orElseThrow(() -> new UrlNotFoundException("SHort code is not found!! " + shortCode));
+        if (url.getExpiresAt() != null &&
+                url.getExpiresAt().isBefore(LocalDateTime.now())) {
+
+            throw new UrlNotFoundException(
+                    "This short URL has expired"
+            );
+        }
         urlClickService.recordClicked(url,ipAddress,userAgent);
         url.setClickCount(url.getClickCount()+1);
         urlRepository.save(url);
         return url.getOrginalUrl();
     }
-    public List<UrlResponse> getAllUrls() {
 
-        return urlRepository.findAll()
-                .stream()
-                .map(this::toResponse)
-                .toList();
-    }
 
-    public UrlResponse createShortUrl(CreateUrlRequest request) {
+
+    public UrlResponse createShortUrl(
+            CreateUrlRequest request,
+            String email
+    ) {
+
+        User user = userRepository
+                .findByEmail(email)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "User not found"
+                        )
+                );
 
         String shortCode;
 
@@ -57,9 +61,11 @@ public class UrlService {
         } while (urlRepository.existsByShortCode(shortCode));
 
         Url url = Url.builder()
+                .user(user)
                 .orginalUrl(request.originalUrl())
                 .shortCode(shortCode)
                 .clickCount(0L)
+                .expiresAt(request.expiresAt())
                 .build();
 
         Url savedUrl = urlRepository.save(url);
@@ -67,28 +73,100 @@ public class UrlService {
         return toResponse(savedUrl);
     }
 
-    public UrlResponse getUrlById(Long id) {
+    public UrlResponse getUrlById(
+            Long id,
+            String email
+    ) {
 
-        Url url = urlRepository.findById(id)
+        User user = userRepository
+                .findByEmail(email)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "User not found"
+                        )
+                );
+
+        Url url = urlRepository
+                .findById(id)
                 .orElseThrow(() ->
                         new UrlNotFoundException(
                                 "URL not found with id: " + id
                         )
                 );
+
+        if (!url.getUser().getId().equals(user.getId())) {
+            throw new UrlNotFoundException(
+                    "URL not found with id: " + id
+            );
+        }
 
         return toResponse(url);
     }
 
-    public void deleteUrl(Long id) {
+    public void deleteUrl(
+            Long id,
+            String email
+    ) {
 
-        Url url = urlRepository.findById(id)
+        User user = userRepository
+                .findByEmail(email)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "User not found"
+                        )
+                );
+
+        Url url = urlRepository
+                .findById(id)
                 .orElseThrow(() ->
                         new UrlNotFoundException(
                                 "URL not found with id: " + id
                         )
                 );
 
+        if (!url.getUser().getId().equals(user.getId())) {
+            throw new UrlNotFoundException(
+                    "URL not found with id: " + id
+            );
+        }
+
         urlRepository.delete(url);
+    }
+
+    public Page<UrlResponse> getAllUrls(
+            String email,
+            String search,
+            Pageable pageable
+    ) {
+
+        User user = userRepository
+                .findByEmail(email)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "User not found"
+                        )
+                );
+
+        Page<Url> urls;
+
+        if (search == null || search.isBlank()) {
+
+            urls = urlRepository
+                    .findByUserOrderByCreatedAtDesc(
+                            user,
+                            pageable
+                    );
+
+        } else {
+
+            urls = urlRepository.searchUrls(
+                    user,
+                    search,
+                    pageable
+            );
+        }
+
+        return urls.map(this::toResponse);
     }
 
     private UrlResponse toResponse(Url url) {
@@ -101,7 +179,9 @@ public class UrlService {
                 url.getOrginalUrl(),
                 url.getShortCode(),
                 shortUrl,
-                url.getClickCount()
+                url.getClickCount(),
+                url.getCreatedAt(),
+                url.getExpiresAt()
         );
     }
 }

@@ -5,7 +5,19 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 @Entity
-@Table(name = "url_clicks")
+@Table(
+        name = "url_clicks",
+        indexes = {
+                @Index(
+                        name = "idx_url_clicks_url_id",
+                        columnList = "url_id"
+                ),
+                @Index(
+                        name = "idx_url_clicks_clicked_at",
+                        columnList = "clicked_at"
+                )
+        }
+)
 @Getter
 @Setter
 @AllArgsConstructor
